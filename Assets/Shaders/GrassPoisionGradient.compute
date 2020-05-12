@@ -1,0 +1,44 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+#pragma kernel CopyTexture
+#pragma kernel ComputeSlope
+
+float4 currentPosition;
+float gradientDistance;
+float tailLength;
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float1> LastTex;
+RWTexture2D<float1> Result;
+RWTexture2D<float4> OutputSlope;
+
+[numthreads(16,16,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    float tailLengthFinal = 0.7 + tailLength * 0.28;
+    float accumulatedWeight = saturate(LastTex.Load(int3(id.xy, 0)).x* tailLengthFinal);
+    accumulatedWeight = accumulatedWeight <= 0.1 ? 0.0 : accumulatedWeight;
+    
+    float2 pUV = float2(id.x / 1024.0 + currentPosition.x - 1.0, id.y / 1024.0 + currentPosition.y - 1.0);
+    float distance = sqrt(pUV.x * pUV.x + pUV.y * pUV.y);
+    float weight = saturate(1 - clamp(distance,0,gradientDistance) / gradientDistance);
+    weight = max(weight, accumulatedWeight);
+    Result[id.xy] = float1(weight);
+}
+
+[numthreads(16, 16, 1)]
+void CopyTexture(uint3 id : SV_DispatchThreadID) {
+    LastTex[id.xy] = Result.Load(int3(id.xy, 0));
+}
+ 
+[numthreads(16,16,1)]
+void ComputeSlope(uint3 id : SV_DispatchThreadID) {
+    float up = id.y == 0 ? Result.Load(int3(id.xy, 0)).x:Result.Load(int3(id.x,id.y-1,0)).x;
+    float down = id.y == 1023 ? Result.Load(int3(id.xy, 0)).x:Result.Load(int3(id.x,id.y+1,0)).x;
+    float left = id.x == 0 ? Result.Load(int3(id.xy, 0)).x:Result.Load(int3(id.x-1,id.y,0)).x;
+    float right = id.x == 1023 ? Result.Load(int3(id.xy, 0)).x:Result.Load(int3(id.x+1,id.y,0)).x;
+
+    float xAxis = (right - left + 1.0) / 2;
+    float yAxis = (up - down + 1.0) / 2;
+    OutputSlope[id.xy] = float4(xAxis, yAxis, 0, 1);
+}
